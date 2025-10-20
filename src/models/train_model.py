@@ -9,6 +9,7 @@ import sys
 import os
 import numpy as np
 import argparse
+import json
 
 # Ensure the source directory is in the Python path to import config
 # This allows the script to be run from the root directory
@@ -23,7 +24,7 @@ from config import (
 # Configure logging to provide informative output during execution
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def train(model_type: str):
+def train(model_type: str, use_best: bool = True):
     """
     Trains and saves model ensembles for each target property using 5-fold cross-validation.
 
@@ -67,7 +68,19 @@ def train(model_type: str):
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     
-    params = MODEL_PARAMS[model_type]
+    params = MODEL_PARAMS[model_type].copy()
+    # If Ridge and best_params.json exists, override alpha unless user disables
+    best_params_path = ARTEFACTS_DIR / 'best_params.json'
+    if model_type == 'ridge' and use_best and best_params_path.exists():
+        try:
+            with open(best_params_path, 'r') as f:
+                best = json.load(f)
+            alpha = float(best.get('alpha'))
+            if alpha > 0:
+                params['alpha'] = alpha
+                logging.info(f"Overriding Ridge alpha with tuned value: {alpha}")
+        except Exception as e:
+            logging.warning(f"Could not read best_params.json: {e}")
     logging.info(f"Using model: {model_class.__name__} with parameters: {params}")
 
     # Loop through each target property to train a separate set of models
@@ -155,6 +168,7 @@ if __name__ == '__main__':
         choices=['ridge', 'gbr'],
         help="The type of model to train ('ridge' or 'gbr'). Defaults to the value in config.py."
     )
+    parser.add_argument('--no-use-best', action='store_true', help='Do not use tuned alpha from best_params.json')
     args = parser.parse_args()
     
-    train(model_type=args.model_type)
+    train(model_type=args.model_type, use_best=not args.no_use_best)

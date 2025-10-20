@@ -3,13 +3,19 @@ This script handles the global preprocessing and feature definition phase.
 It loads the raw data, fits the preprocessing transformers (TF-IDF vectorizers for
 VH/VL sequences and a One-Hot Encoder for the subtype), and saves these fitted
 transformers to disk for later use in training and prediction.
+
+It can optionally consume tuned hyperparameters from artefacts/best_params.json
+or via CLI flags to override ngram_max and total vocabulary size.
 """
 
+import argparse
+import json
 import pandas as pd
 import joblib
 import logging
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import ColumnTransformer
 
 # It's good practice to add the project's 'src' directory to the path
 # to ensure modules are found correctly.
@@ -28,10 +34,58 @@ logging.basicConfig(
     ]
 )
 
+def get_feature_pipelines(ngram_range=(1, config.N_GRAM_MAX), vocab_size=config.K_VOCAB):
+    """
+    Create TF-IDF vectorizers for VH and VL sequences and a OneHotEncoder for subtype.
+
+    Parameters:
+    - ngram_range: tuple[int, int] inclusive ngram range for character analyzer
+    - vocab_size: int total vocabulary cap (split equally between VH and VL)
+
+    Returns:
+    - vectorizer_vh: TfidfVectorizer
+    - vectorizer_vl: TfidfVectorizer
+    - encoder_ohe: OneHotEncoder
+    """
+    max_features_each = max(1, vocab_size // 2)
+    tfidf_base = dict(config.TFIDF_PARAMS)
+    # Override ngram_range per trial
+    tfidf_base["ngram_range"] = ngram_range
+
+    vectorizer_vh = TfidfVectorizer(max_features=max_features_each, **tfidf_base)
+    vectorizer_vl = TfidfVectorizer(max_features=max_features_each, **tfidf_base)
+    encoder_ohe = OneHotEncoder(handle_unknown='ignore', sparse_output=True)
+    return vectorizer_vh, vectorizer_vl, encoder_ohe
+
+
+def get_preprocessor(vectorizer_vh, vectorizer_vl, encoder_ohe):
+    """
+    Build a ColumnTransformer that applies the provided transformers to the
+    correct dataframe columns per config.
+
+    Note: The estimators will be cloned by sklearn when fit inside a Pipeline.
+    """
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("vh_tfidf", vectorizer_vh, config.VH_SEQUENCE_COL),
+            ("vl_tfidf", vectorizer_vl, config.VL_SEQUENCE_COL),
+            ("hc_ohe", encoder_ohe, [config.HC_SUBTYPE_COL]),
+        ],
+        sparse_threshold=0.3,
+        remainder='drop'
+    )
+    return preprocessor
+
 def main():
     """
     Main function to execute the feature building process.
     """
+    parser = argparse.ArgumentParser(description="Fit and persist feature transformers")
+    parser.add_argument("--ngram-max", type=int, default=None, help="Override max n-gram size (upper bound of ngram_range)")
+    parser.add_argument("--vocab-size", type=int, default=None, help="Override total vocabulary size (split VH/VL)")
+    parser.add_argument("--use-best", action="store_true", help="Use artefacts/best_params.json if available")
+    args = parser.parse_args()
+
     logging.info("Starting feature building process...")
 
     # --- 1. Load Data ---
@@ -56,12 +110,36 @@ def main():
     logging.info("Handled missing values.")
 
     # --- 3. Define & Fit Preprocessing Transformers ---
-    
+
+    # Determine hyperparameters
+    tuned_ngram_max = None
+    tuned_vocab = None
+    best_params_path = config.ARTEFACTS_DIR / "best_params.json"
+    if args.use_best and best_params_path.exists():
+        try:
+            with open(best_params_path, "r") as f:
+                best = json.load(f)
+            tuned_ngram_max = int(best.get("ngram_max") or 0) or None
+            tuned_vocab = int(best.get("vocab_size") or 0) or None
+            logging.info(f"Using tuned hyperparameters from {best_params_path}: ngram_max={tuned_ngram_max}, vocab_size={tuned_vocab}")
+        except Exception as e:
+            logging.warning(f"Failed to read best params: {e}. Falling back to defaults.")
+
+    # CLI overrides take precedence
+    if args.ngram_max is not None:
+        tuned_ngram_max = args.ngram_max
+    if args.vocab_size is not None:
+        tuned_vocab = args.vocab_size
+
+    ngram_max = tuned_ngram_max if tuned_ngram_max is not None else config.N_GRAM_MAX
+    vocab_total = tuned_vocab if tuned_vocab is not None else config.K_VOCAB
+    logging.info(f"Feature settings -> ngram_range=(1,{ngram_max}), total_vocab={vocab_total} (each={max(1, vocab_total//2)})")
+
     # VH N-gram Vectorizer
     logging.info("Fitting VH N-gram TfidfVectorizer...")
     vectorizer_vh = TfidfVectorizer(
-        max_features=config.K_VOCAB // 2,
-        **config.TFIDF_PARAMS
+        max_features=vocab_total // 2,
+        **{**config.TFIDF_PARAMS, "ngram_range": (1, ngram_max)}
     )
     vectorizer_vh.fit(df[config.VH_SEQUENCE_COL])
     logging.info(f"VH vectorizer fitted. Vocabulary size: {len(vectorizer_vh.vocabulary_)}")
@@ -69,8 +147,8 @@ def main():
     # VL N-gram Vectorizer
     logging.info("Fitting VL N-gram TfidfVectorizer...")
     vectorizer_vl = TfidfVectorizer(
-        max_features=config.K_VOCAB // 2,
-        **config.TFIDF_PARAMS
+        max_features=vocab_total // 2,
+        **{**config.TFIDF_PARAMS, "ngram_range": (1, ngram_max)}
     )
     vectorizer_vl.fit(df[config.VL_SEQUENCE_COL])
     logging.info(f"VL vectorizer fitted. Vocabulary size: {len(vectorizer_vl.vocabulary_)}")

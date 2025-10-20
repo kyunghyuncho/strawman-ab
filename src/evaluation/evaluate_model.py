@@ -1,5 +1,7 @@
 """
 Evaluate the model using 5-fold cross-validation and save the out-of-fold predictions.
+Supports choosing model type (ridge/gbr) and expects model artefacts saved per
+target with suffix models_{target}_{model_type}.joblib.
 """
 import pandas as pd
 import numpy as np
@@ -9,12 +11,13 @@ from scipy.stats import spearmanr
 from sklearn.utils import resample
 import sys
 import os
+import argparse
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 
 from src import config
 
-def evaluate():
+def evaluate(model_type: str):
     """
     Train the model using 5-fold cross-validation and save out-of-fold predictions.
     """
@@ -79,7 +82,7 @@ def evaluate():
             X_test = hstack([X_test_vh, X_test_vl, X_test_ohe])
 
             # Load the pre-trained model ensemble for this fold
-            model_path = config.ARTEFACTS_DIR / f'models_{target}.joblib'
+            model_path = config.ARTEFACTS_DIR / f'models_{target}_{model_type}.joblib'
             all_fold_ensembles = joblib.load(model_path)
             current_ensemble_models = all_fold_ensembles[fold_i]
 
@@ -132,4 +135,7 @@ def evaluate():
 
 
 if __name__ == '__main__':
-    evaluate()
+    parser = argparse.ArgumentParser(description='Evaluate models with 5-fold CV and save OOF predictions')
+    parser.add_argument('--model-type', type=str, default=config.MODEL_TYPE, choices=['ridge', 'gbr'])
+    args = parser.parse_args()
+    evaluate(model_type=args.model_type)
