@@ -9,6 +9,7 @@ import sys
 import os
 import numpy as np
 import argparse
+import json
 
 # Ensure the source directory is in the Python path to import config
 # This allows the script to be run from the root directory
@@ -23,7 +24,7 @@ from config import (
 # Configure logging to provide informative output during execution
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def train(model_type: str):
+def train(model_type: str, use_best: bool = True):
     """
     Trains and saves model ensembles for each target property using 5-fold cross-validation.
 
@@ -49,12 +50,12 @@ def train(model_type: str):
         logging.error(f"Error: The data file was not found at {DATA_FILE}. Please ensure it is in the correct location.")
         return
 
-    # Load the pre-fitted transformers created by the feature generation script
+    # Load the global transformers (fallback). Per-target overrides will be loaded later per target if available
     try:
-        vectorizer_vh = joblib.load(ARTEFACTS_DIR / 'vectorizer_vh.joblib')
-        vectorizer_vl = joblib.load(ARTEFACTS_DIR / 'vectorizer_vl.joblib')
-        encoder_ohe = joblib.load(ARTEFACTS_DIR / 'encoder_ohe.joblib')
-        logging.info("Successfully loaded pre-fitted transformers (vectorizers and OHE).")
+        vectorizer_vh_global = joblib.load(ARTEFACTS_DIR / 'vectorizer_vh.joblib')
+        vectorizer_vl_global = joblib.load(ARTEFACTS_DIR / 'vectorizer_vl.joblib')
+        encoder_ohe_global = joblib.load(ARTEFACTS_DIR / 'encoder_ohe.joblib')
+        logging.info("Loaded global transformers (vectorizers and OHE). Will override with per-target if present.")
     except FileNotFoundError as e:
         logging.error(f"Error loading transformers: {e}. Please run `src/features/build_features.py` first.")
         return
@@ -67,12 +68,51 @@ def train(model_type: str):
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     
-    params = MODEL_PARAMS[model_type]
-    logging.info(f"Using model: {model_class.__name__} with parameters: {params}")
+    params_template = MODEL_PARAMS[model_type].copy()
+    # Load best params for possible per-target overrides
+    best_params_path = ARTEFACTS_DIR / 'best_params.json'
+    best_params = None
+    if use_best and best_params_path.exists():
+        try:
+            with open(best_params_path, 'r') as f:
+                best_params = json.load(f)
+        except Exception as e:
+            logging.warning(f"Could not read best_params.json: {e}")
+    logging.info(f"Using model: {model_class.__name__} with base parameters: {params_template}")
 
     # Loop through each target property to train a separate set of models
     for target in TARGET_PROPERTIES:
         logging.info(f"--- Processing Target: {target} ---")
+
+        # Determine transformers for this target
+        vectorizer_vh = vectorizer_vh_global
+        vectorizer_vl = vectorizer_vl_global
+        encoder_ohe = encoder_ohe_global
+        try:
+            vh_path = ARTEFACTS_DIR / f'vectorizer_vh_{target}.joblib'
+            vl_path = ARTEFACTS_DIR / f'vectorizer_vl_{target}.joblib'
+            ohe_path = ARTEFACTS_DIR / f'encoder_ohe_{target}.joblib'
+            if vh_path.exists() and vl_path.exists() and ohe_path.exists():
+                vectorizer_vh = joblib.load(vh_path)
+                vectorizer_vl = joblib.load(vl_path)
+                encoder_ohe = joblib.load(ohe_path)
+                logging.info(f"Using per-target transformers for {target}.")
+        except Exception as e:
+            logging.warning(f"Falling back to global transformers for {target}: {e}")
+
+        # Determine model params for this target
+        params = params_template.copy()
+        if model_type == 'ridge' and use_best and best_params:
+            try:
+                # Prefer per_target alpha, then global, then default
+                per_target = (best_params.get('per_target') or {}).get(target) or {}
+                global_best = best_params.get('global') or {}
+                alpha = per_target.get('alpha') or global_best.get('alpha') or best_params.get('alpha')
+                if alpha is not None and float(alpha) > 0:
+                    params['alpha'] = float(alpha)
+                    logging.info(f"Overriding Ridge alpha for {target} with tuned value: {alpha}")
+            except Exception:
+                pass
 
         # Create a copy of the dataframe and drop rows where the current target is missing
         # This ensures that we only train on data with valid target values
@@ -155,6 +195,7 @@ if __name__ == '__main__':
         choices=['ridge', 'gbr'],
         help="The type of model to train ('ridge' or 'gbr'). Defaults to the value in config.py."
     )
+    parser.add_argument('--no-use-best', action='store_true', help='Do not use tuned alpha from best_params.json')
     args = parser.parse_args()
     
-    train(model_type=args.model_type)
+    train(model_type=args.model_type, use_best=not args.no_use_best)
