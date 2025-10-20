@@ -24,10 +24,10 @@ def evaluate(model_type: str):
     # Load the full training data
     df = pd.read_csv(config.DATA_FILE)
 
-    # Load the pre-fitted transformers
-    vectorizer_vh = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vh.joblib')
-    vectorizer_vl = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vl.joblib')
-    encoder_ohe = joblib.load(config.ARTEFACTS_DIR / 'encoder_ohe.joblib')
+    # Load global pre-fitted transformers (fallback). Per-target overrides are loaded in-loop
+    vectorizer_vh_global = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vh.joblib')
+    vectorizer_vl_global = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vl.joblib')
+    encoder_ohe_global = joblib.load(config.ARTEFACTS_DIR / 'encoder_ohe.joblib')
 
     # Initialize a dataframe to store all out-of-fold predictions
     oof_preds_df = pd.DataFrame({
@@ -41,6 +41,22 @@ def evaluate(model_type: str):
 
         cv_spearman_scores = []
         fold_predictions = []
+
+        # Choose transformers for this target (per-target if available, otherwise global)
+        vectorizer_vh = vectorizer_vh_global
+        vectorizer_vl = vectorizer_vl_global
+        encoder_ohe = encoder_ohe_global
+        try:
+            vh_path = config.ARTEFACTS_DIR / f'vectorizer_vh_{target}.joblib'
+            vl_path = config.ARTEFACTS_DIR / f'vectorizer_vl_{target}.joblib'
+            ohe_path = config.ARTEFACTS_DIR / f'encoder_ohe_{target}.joblib'
+            if vh_path.exists() and vl_path.exists() and ohe_path.exists():
+                vectorizer_vh = joblib.load(vh_path)
+                vectorizer_vl = joblib.load(vl_path)
+                encoder_ohe = joblib.load(ohe_path)
+                print(f"  Using per-target transformers for {target}.")
+        except Exception as e:
+            print(f"  Warning: falling back to global transformers for {target}: {e}")
 
         # --- Outer CV Loop ---
         for fold_i in config.FOLDS:

@@ -22,16 +22,10 @@ def predict(model_type: str):
     test_file = config.DATA_DIR / 'heldout-set-sequences.csv'
     df_test = pd.read_csv(test_file)
 
-    # Load the pre-fitted transformers
-    vectorizer_vh = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vh.joblib')
-    vectorizer_vl = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vl.joblib')
-    encoder_ohe = joblib.load(config.ARTEFACTS_DIR / 'encoder_ohe.joblib')
-
-    # Transform the test data features
-    X_test_vh = vectorizer_vh.transform(df_test[config.VH_SEQUENCE_COL])
-    X_test_vl = vectorizer_vl.transform(df_test[config.VL_SEQUENCE_COL])
-    X_test_ohe = encoder_ohe.transform(df_test[[config.HC_SUBTYPE_COL]])
-    X_test_final = hstack([X_test_vh, X_test_vl, X_test_ohe])
+    # Load the global transformers (fallback)
+    vectorizer_vh_global = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vh.joblib')
+    vectorizer_vl_global = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vl.joblib')
+    encoder_ohe_global = joblib.load(config.ARTEFACTS_DIR / 'encoder_ohe.joblib')
 
     # Initialize a dataframe to store all predictions
     predictions_df = pd.DataFrame({'antibody_name': df_test['antibody_name']})
@@ -39,6 +33,24 @@ def predict(model_type: str):
     # --- Loop through each target property ---
     for target in config.TARGET_PROPERTIES:
         print(f"  Predicting for target: {target}...")
+
+        # Load per-target transformers if available
+        vectorizer_vh = vectorizer_vh_global
+        vectorizer_vl = vectorizer_vl_global
+        encoder_ohe = encoder_ohe_global
+        vh_path = config.ARTEFACTS_DIR / f'vectorizer_vh_{target}.joblib'
+        vl_path = config.ARTEFACTS_DIR / f'vectorizer_vl_{target}.joblib'
+        ohe_path = config.ARTEFACTS_DIR / f'encoder_ohe_{target}.joblib'
+        if vh_path.exists() and vl_path.exists() and ohe_path.exists():
+            vectorizer_vh = joblib.load(vh_path)
+            vectorizer_vl = joblib.load(vl_path)
+            encoder_ohe = joblib.load(ohe_path)
+
+        # Transform test features using the chosen transformers
+        X_test_vh = vectorizer_vh.transform(df_test[config.VH_SEQUENCE_COL])
+        X_test_vl = vectorizer_vl.transform(df_test[config.VL_SEQUENCE_COL])
+        X_test_ohe = encoder_ohe.transform(df_test[[config.HC_SUBTYPE_COL]])
+        X_test_final = hstack([X_test_vh, X_test_vl, X_test_ohe])
 
         # Load the full set of model ensembles for the target
         model_path = config.ARTEFACTS_DIR / f'models_{target}_{model_type}.joblib'
