@@ -23,19 +23,21 @@ FOLD_COLUMN = 'hierarchical_cluster_IgG_isotype_stratified_fold'
 
 # --- Target Properties ---
 TARGET_PROPERTIES = ['Titer', 'HIC', 'PR_CHO', 'Tm2', 'AC-SINS_pH7.4']
+# Targets to be log-transformed (log1p)
+LOG_TRANSFORM_TARGETS = [] # ['Titer', 'HIC', 'PR_CHO', 'Tm2']
 
 # --- Cross-Validation ---
-FOLDS = [1, 2, 3, 4, 5]
+FOLDS = [0, 1, 2, 3, 4]
 
 # --- Feature Engineering Hyperparameters ---
 # The maximum N for N-grams (1 to N_GRAM_MAX will be used)
-N_GRAM_MAX = 8
+N_GRAM_MAX = 32
 # Total vocabulary size (split between VH and VL)
-K_VOCAB = 20000
+K_VOCAB = 50000
 
 # --- Model & Ensemble Hyperparameters ---
 # Number of bootstrap models to train in each ensemble
-K_BOOTSTRAP = 20
+K_BOOTSTRAP = 15
 # Random state for reproducibility in bootstrap sampling and model training
 RANDOM_STATE = 42
 
@@ -51,7 +53,7 @@ TFIDF_PARAMS = {
 # --- Model Parameters ---
 # Parameters for the sparse linear regressor (Ridge)
 MODEL_PARAMS = {
-    'alpha': 1e-5,  # Regularization strength
+    'alpha': 1e-8,  # Regularization strength
     'fit_intercept': True,
     'tol': 1e-3,
     'solver': 'sparse_cg'

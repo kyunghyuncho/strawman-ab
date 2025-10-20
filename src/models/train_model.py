@@ -6,6 +6,7 @@ from sklearn.utils import resample
 import logging
 import sys
 import os
+import numpy as np
 
 # Ensure the source directory is in the Python path to import config
 # This allows the script to be run from the root directory
@@ -13,7 +14,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import (
     DATA_FILE, TARGET_PROPERTIES, FOLD_COLUMN, FOLDS, VH_SEQUENCE_COL,
-    VL_SEQUENCE_COL, HC_SUBTYPE_COL, K_BOOTSTRAP, MODEL_PARAMS, ARTEFACTS_DIR
+    VL_SEQUENCE_COL, HC_SUBTYPE_COL, K_BOOTSTRAP, MODEL_PARAMS, ARTEFACTS_DIR,
+    LOG_TRANSFORM_TARGETS
 )
 
 # Configure logging to provide informative output during execution
@@ -63,6 +65,11 @@ def train():
         # This ensures that we only train on data with valid target values
         df_target = df.dropna(subset=[target]).copy()
         logging.info(f"Training on {len(df_target)} samples for {target} after dropping NaNs.")
+
+        # Apply log transformation if the target is in the specified list
+        if target in LOG_TRANSFORM_TARGETS:
+            df_target[target] = np.log1p(df_target[target])
+            logging.info(f"Applied log1p transformation to target: {target}")
 
         # This dictionary will store the ensembles for each of the 5 folds
         all_fold_ensembles = {}

@@ -7,6 +7,10 @@ import joblib
 from scipy.sparse import hstack
 from scipy.stats import spearmanr
 from sklearn.utils import resample
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
 
 from src import config
 
@@ -32,9 +36,6 @@ def evaluate():
     for target in config.TARGET_PROPERTIES:
         print(f"--- Evaluating for target: {target} ---")
 
-        # Drop rows where the target is missing
-        df_target = df.dropna(subset=[target]).copy()
-        
         cv_spearman_scores = []
         fold_predictions = []
 
@@ -42,21 +43,35 @@ def evaluate():
         for fold_i in config.FOLDS:
             print(f"  Training on folds other than {fold_i}...")
 
-            # Split data into training and testing sets for the current fold
-            train_mask = (df_target[config.FOLD_COLUMN] != fold_i)
-            test_mask = (df_target[config.FOLD_COLUMN] == fold_i)
+            # --- Data Splitting ---
+            # Use all data for testing to ensure predictions for all antibodies
+            df_test = df[df[config.FOLD_COLUMN] == fold_i]
             
-            df_train = df_target[train_mask]
-            df_test = df_target[test_mask]
-            
+            # For training, use data from other folds AND where the target is not missing
+            train_mask = (df[config.FOLD_COLUMN] != fold_i) & (df[target].notna())
+            df_train = df[train_mask]
+
+            # Skip fold if no training data is available
+            if df_train.empty:
+                print(f"    Skipping fold {fold_i} for target {target} due to no training samples.")
+                # Add empty predictions for this fold to maintain structure
+                fold_preds_df = pd.DataFrame({'antibody_name': df_test['antibody_name'], target: np.nan})
+                fold_predictions.append(fold_preds_df)
+                continue
+
             y_train = df_train[target]
-            y_test = df_test[target]
+            y_test = df_test[target] # This will contain NaNs
 
             # Transform features using pre-fitted transformers
             X_train_vh = vectorizer_vh.transform(df_train[config.VH_SEQUENCE_COL])
             X_train_vl = vectorizer_vl.transform(df_train[config.VL_SEQUENCE_COL])
             X_train_ohe = encoder_ohe.transform(df_train[[config.HC_SUBTYPE_COL]])
             X_train = hstack([X_train_vh, X_train_vl, X_train_ohe])
+
+            # If test set is empty, continue
+            if df_test.empty:
+                print(f"    Skipping fold {fold_i} for target {target} due to no test samples.")
+                continue
 
             X_test_vh = vectorizer_vh.transform(df_test[config.VH_SEQUENCE_COL])
             X_test_vl = vectorizer_vl.transform(df_test[config.VL_SEQUENCE_COL])
@@ -72,6 +87,10 @@ def evaluate():
             fold_preds_all_models = [model.predict(X_test) for model in current_ensemble_models]
             y_pred_fold_avg = np.mean(fold_preds_all_models, axis=0)
 
+            # Inverse transform predictions if the target was log-transformed
+            if target in config.LOG_TRANSFORM_TARGETS:
+                y_pred_fold_avg = np.expm1(y_pred_fold_avg)
+
             # Store predictions along with antibody names for later merging
             fold_preds_df = pd.DataFrame({
                 'antibody_name': df_test['antibody_name'],
@@ -79,15 +98,28 @@ def evaluate():
             })
             fold_predictions.append(fold_preds_df)
 
-            # Calculate and store Spearman correlation
-            spearman_corr = spearmanr(y_test, y_pred_fold_avg)[0]
-            cv_spearman_scores.append(spearman_corr)
-            print(f"    Fold {fold_i} Spearman Correlation: {spearman_corr:.4f}")
+            # --- Calculate Spearman correlation only on non-missing targets ---
+            # Create a temporary dataframe for calculating correlation
+            temp_eval_df = pd.DataFrame({'y_true': y_test, 'y_pred': y_pred_fold_avg})
+            
+            # Drop rows where the true value is missing
+            temp_eval_df.dropna(inplace=True)
+
+            # Calculate and store Spearman correlation if there are samples left
+            if not temp_eval_df.empty:
+                spearman_corr = spearmanr(temp_eval_df['y_true'], temp_eval_df['y_pred'])[0]
+                cv_spearman_scores.append(spearman_corr)
+                print(f"    Fold {fold_i} Spearman Correlation: {spearman_corr:.4f}")
+            else:
+                print(f"    Fold {fold_i} Spearman Correlation: N/A (no true values)")
 
         # --- After all folds for the current target ---
         # Report average CV score
-        avg_spearman = np.mean(cv_spearman_scores)
-        print(f"  Average Spearman for {target}: {avg_spearman:.4f}\n")
+        if cv_spearman_scores:
+            avg_spearman = np.mean(cv_spearman_scores)
+            print(f"  Average Spearman for {target}: {avg_spearman:.4f}\n")
+        else:
+            print(f"  Average Spearman for {target}: N/A (no scores calculated)\n")
 
         # Merge the predictions for this target into the main OOF dataframe
         target_oof_preds = pd.concat(fold_predictions)

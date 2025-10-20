@@ -5,6 +5,9 @@ import pandas as pd
 import numpy as np
 import joblib
 from scipy.sparse import hstack
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 from src import config
 
@@ -54,6 +57,10 @@ def predict():
         # Final prediction is the average of the 5 ensemble predictions
         final_predictions = np.mean(all_ensemble_predictions, axis=0)
         
+        # Inverse transform predictions if the target was log-transformed
+        if target in config.LOG_TRANSFORM_TARGETS:
+            final_predictions = np.expm1(final_predictions)
+
         # Add predictions to the dataframe
         predictions_df[target] = final_predictions
 
