@@ -6,130 +6,157 @@ This repository contains the code used for the Ginkgo Antibody Developability (A
 
 The pipeline below reproduces our baseline and generates leaderboard-ready submission files.
 
-## 1. Project Goal
+## 1) Project goal
 
-The primary objective is to build a predictive model for several key antibody properties using their heavy and light chain amino acid (AA) sequences. The model is a sparse linear regression ensemble trained on N-gram features, with performance evaluated using a 5-fold cross-validation scheme based on predefined folds.
-
----
-
-## 2. Core Methodology
-
-The model combines N-gram sequence features with one-hot encoded antibody subtypes.
-
-1.  **Feature Engineering**:
-    *   **N-grams**: Separate vocabularies are generated for heavy (`vh_protein_sequence`) and light (`vl_protein_sequence`) chains. Each sequence is tokenized into overlapping character N-grams (e.g., "AVG", "VGL").
-    *   **TF-IDF**: A `TfidfVectorizer` is used for each chain to build a vocabulary and transform sequences into sparse vectors of TF-IDF weighted N-gram counts.
-    *   **Subtype**: The `hc_subtype` categorical feature is one-hot encoded.
-    *   **Final Vector**: The final feature vector for an antibody is the horizontal concatenation of its VH TF-IDF vector, VL TF-IDF vector, and subtype OHE vector.
-
-2.  **Target Transformation**:
-    *   To handle skewed distributions, a `log1p` transformation is applied to `Titer`, `HIC`, `PR_CHO`, and `Tm2` before training.
-    *   The `AC-SINS_pH7.4` property, which contains negative values, is not transformed.
-    *   Predictions are converted back to their original scale using `expm1`.
-
-3.  **Model**:
-    *   A **sparse linear regression** model (`Ridge`) is used, which is well-suited for high-dimensional, sparse feature sets.
-
-4.  **Ensemble**:
-    *   For each training fold, an ensemble of `Ridge` regressors is trained on bootstrap-resampled versions of the training data. The final prediction is the average of the predictions from all models in the ensemble.
-
-5.  **Evaluation**:
-    *   The model is evaluated using the 5 predefined folds from the `hierarchical_cluster_IgG_isotype_stratified_fold` column.
-    *   The primary metric is the **Spearman Rank Correlation** between the ensemble predictions and the true target values, averaged across the 5 folds.
+Predict key antibody properties from heavy/light chain AA sequences using sparse N-gram features plus subtype one-hot encoding. Models are trained with predefined 5 folds and evaluated by mean Spearman correlation.
 
 ---
 
-## 3. Project Structure
+## 2) Method overview
+
+- Feature engineering
+    - Separate TF‑IDF character N‑gram vectorizers for VH (`vh_protein_sequence`) and VL (`vl_protein_sequence`).
+    - One‑hot encoded subtype (`hc_subtype`).
+    - Final design matrix is the horizontal concatenation of VH TF‑IDF, VL TF‑IDF, and OHE.
+- Targets and transforms
+    - Log transforms are configurable via `src/config.py::LOG_TRANSFORM_TARGETS` (currently none enabled). If enabled, training uses `log1p` and predictions are inverse‑transformed with `expm1`.
+- Models and ensembling
+    - Ridge (sparse linear) or Gradient Boosting Regressor. Default: Ridge.
+    - For each fold, an ensemble of K bootstrap models is trained; predictions average across bootstrap models and folds.
+- Per‑target hyperparameters (new)
+    - You can tune and use per‑target `alpha`, `ngram_max`, and `vocab_size`. Artefacts and best params are saved per target and picked up automatically during training/prediction.
+
+---
+
+## 3) Repository layout (key paths)
 
 ```
 .
-├── GDPa1_v1.2_20250814.csv
-├── heldout-set-sequences.csv
-├── implementation.md
-├── overall_plan.md
-├── README.md
+├── GDPa1_v1.2_20250814.csv                # training data
+├── heldout-set-sequences.csv              # private test sequences
 ├── requirements.txt
 ├── artefacts/
-│   ├── encoder_ohe.joblib
-│   ├── models_AC-SINS_pH7.4.joblib
-│   ├── models_HIC.joblib
-│   ├── models_PR_CHO.joblib
-│   ├── models_Titer.joblib
-│   ├── models_Tm2.joblib
-│   ├── vectorizer_vh.joblib
-│   └── vectorizer_vl.joblib
+│   ├── vectorizer_vh.joblib               # global TF‑IDF VH (fallback)
+│   ├── vectorizer_vl.joblib               # global TF‑IDF VL (fallback)
+│   ├── encoder_ohe.joblib                 # global OHE (fallback)
+│   ├── vectorizer_vh_{Target}.joblib      # per‑target TF‑IDF VH (optional)
+│   ├── vectorizer_vl_{Target}.joblib      # per‑target TF‑IDF VL (optional)
+│   ├── encoder_ohe_{Target}.joblib        # per‑target OHE (optional)
+│   ├── models_{Target}_ridge.joblib       # trained ensembles (ridge)
+│   ├── models_{Target}_gbr.joblib         # trained ensembles (gbr)
+│   ├── best_params.json                   # tuned params (global + per_target)
+│   └── skopt_result[_Target].joblib       # optional skopt dumps
 ├── results/
-│   ├── gdp_a1_cv_predictions.csv
-│   ├── gdp_a1_cv_predictions_raw.csv
-│   ├── private_test_predictions.csv
-│   └── private_test_predictions_raw.csv
+│   ├── gdp_a1_cv_predictions_raw.csv      # OOF preds (raw)
+│   ├── gdp_a1_cv_predictions.csv          # OOF preds (submission format)
+│   ├── private_test_predictions_raw_*.csv # test preds (by model type)
+│   └── private_test_predictions.csv       # test preds (submission format)
 └── src/
-    ├── __init__.py
-    ├── config.py
-    ├── evaluation/
-    │   ├── __init__.py
-    │   └── evaluate_model.py
-    ├── features/
-    │   ├── __init__.py
-    │   └── build_features.py
-    ├── models/
-    │   ├── __init__.py
-    │   ├── predict_model.py
-    │   └── train_model.py
-    └── submission/
-        ├── __init__.py
-        └── create_submission.py
+        ├── config.py
+        ├── features/build_features.py         # fit & persist vectorizers/OHE
+        ├── models/hyperparameter_search.py    # skopt tuning (global/per‑target)
+        ├── models/train_model.py              # train ensembles per target
+        ├── models/predict_model.py            # predict on private test
+        ├── evaluation/evaluate_model.py       # OOF predictions & metrics
+        └── submission/create_submission.py    # format final CSVs
 ```
 
 ---
 
-## 4. How to Run the Pipeline
+## 4) Quick start
 
-Follow these steps to reproduce the results.
+1) Install dependencies
 
-1.  **Install Dependencies**:
-    Install the required packages from `requirements.txt`.
-    ```bash
-    pip install -r requirements.txt
-    ```
+```bash
+pip install -r requirements.txt
+```
 
-2.  **Generate Features**:
-    This script fits the TF-IDF vectorizers and the one-hot encoder on the entire dataset and saves them to the `artefacts/` directory.
-    ```bash
-    python src/features/build_features.py
-    ```
+2) (Optional) Tune hyperparameters
 
-3.  **Train Models**:
-    This script trains an ensemble of models for each of the five target properties using 5-fold cross-validation. The trained model ensembles are saved to the `artefacts/` directory.
-    ```bash
-    python src/models/train_model.py
-    ```
+- Global/average tuning across all targets
 
-4.  **Evaluate Models and Generate CV Predictions**:
-    This script loads the trained models and generates out-of-fold predictions for the training data (`GDPa1_v1.2_20250814.csv`). It also calculates and prints the Spearman correlation for each target property. The raw predictions are saved.
-    ```bash
-    python src/evaluation/evaluate_model.py
-    ```
+```bash
+python -m src.models.hyperparameter_search --target avg --n-iter 30
+```
 
-5.  **Generate Predictions for the Private Test Set**:
-    This script uses the trained models to make predictions on the private test set (`heldout-set-sequences.csv`). The raw predictions are saved.
-    ```bash
-    python src/models/predict_model.py
-    ```
+- Single target or all targets (per‑target tuning)
 
-6.  **Create Final Submission Files**:
-    This script formats the raw cross-validation and private test predictions into the final CSV files required for submission.
-    ```bash
-    python src/submission/create_submission.py
-    ```
+```bash
+# one target (faster)
+python -m src.models.hyperparameter_search --target Titer --n-iter 15
+
+# all targets (longer)
+python -m src.models.hyperparameter_search --target all --n-iter 15
+```
+
+This writes trials CSV(s) and updates `artefacts/best_params.json` with:
+
+```json
+{
+    "global": {"alpha": ..., "ngram_max": ..., "vocab_size": ..., "best_objective": ...},
+    "per_target": {
+        "Titer": {"alpha": ..., "ngram_max": ..., "vocab_size": ..., "best_objective": ...},
+        "HIC":   { ... }
+    },
+    "alpha": ..., "ngram_max": ..., "vocab_size": ...       // legacy mirror of global
+}
+```
+
+3) Build features
+
+- Build global transformers (fallback)
+
+```bash
+python -m src.features.build_features
+```
+
+- Build per‑target transformers using tuned params
+
+```bash
+python -m src.features.build_features --use-best --target all
+# or a single target
+python -m src.features.build_features --use-best --target Titer
+```
+
+4) Train models
+
+```bash
+# Ridge (default). Uses per‑target alpha and per‑target vectorizers if available.
+python -m src.models.train_model --model-type ridge
+
+# Gradient Boosting (optional)
+python -m src.models.train_model --model-type gbr
+```
+
+5) Evaluate and get OOF predictions
+
+```bash
+python -m src.evaluation.evaluate_model
+```
+
+6) Predict on private test
+
+```bash
+python -m src.models.predict_model --model-type ridge
+```
+
+7) Create final submission files
+
+```bash
+python -m src.submission.create_submission
+```
 
 ---
 
-## 5. Results
+## 5) Outputs
 
-The final, formatted prediction files are saved in the `results/` directory:
+- Out-of-fold (training) predictions:
+    - `results/gdp_a1_cv_predictions_raw.csv`
+    - `results/gdp_a1_cv_predictions.csv`
+- Private test predictions:
+    - `results/private_test_predictions_raw_{model_type}.csv` (e.g., `_ridge`)
+    - `results/private_test_predictions.csv` (submission format)
 
-*   `gdp_a1_cv_predictions.csv`: Out-of-fold predictions for the training set.
-*   `private_test_predictions.csv`: Predictions for the private test set.
+---
 
 These CSVs are formatted to be compatible with the Ginkgo AbDev leaderboard upload flow. Refer to the Space linked above for any updates to the submission format or evaluation process.
