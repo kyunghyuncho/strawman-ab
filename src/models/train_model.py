@@ -17,7 +17,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import (
     DATA_FILE, TARGET_PROPERTIES, FOLD_COLUMN, FOLDS, VH_SEQUENCE_COL,
     VL_SEQUENCE_COL, HC_SUBTYPE_COL, K_BOOTSTRAP, MODEL_PARAMS, ARTEFACTS_DIR,
-    LOG_TRANSFORM_TARGETS, MODEL_TYPE
+    LOG_TRANSFORM_TARGETS, MODEL_TYPE, TRIM_OUTLIERS, TRIM_QUANTILE
 )
 
 # Configure logging to provide informative output during execution
@@ -94,7 +94,21 @@ def train(model_type: str):
             # Split data into training and hold-out (test) sets for this fold
             # The training set consists of all data NOT in the current fold
             train_mask = (df_target[FOLD_COLUMN] != fold_i)
-            df_train = df_target[train_mask]
+            df_train_full = df_target[train_mask]
+
+            # --- Outlier Trimming ---
+            if TRIM_OUTLIERS:
+                lower_bound = df_train_full[target].quantile(TRIM_QUANTILE)
+                upper_bound = df_train_full[target].quantile(1 - TRIM_QUANTILE)
+                
+                original_count = len(df_train_full)
+                df_train = df_train_full[
+                    (df_train_full[target] >= lower_bound) & (df_train_full[target] <= upper_bound)
+                ]
+                trimmed_count = original_count - len(df_train)
+                logging.info(f"    Trimmed {trimmed_count} outliers from training data for fold {fold_i} ({((trimmed_count/original_count)*100):.2f}%).")
+            else:
+                df_train = df_train_full
             
             y_train = df_train[target]
 

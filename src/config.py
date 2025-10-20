@@ -31,9 +31,9 @@ FOLDS = [0, 1, 2, 3, 4]
 
 # --- Feature Engineering Hyperparameters ---
 # The maximum N for N-grams (1 to N_GRAM_MAX will be used)
-N_GRAM_MAX = 32
+N_GRAM_MAX = 64
 # Total vocabulary size (split between VH and VL)
-K_VOCAB = 50000
+K_VOCAB = 2000
 
 # --- Model & Ensemble Hyperparameters ---
 # Number of bootstrap models to train in each ensemble
@@ -77,3 +77,9 @@ MODEL_PARAMS = {
     'ridge': RIDGE_MODEL_PARAMS,
     'gbr': GBR_MODEL_PARAMS
 }
+
+# --- Outlier Trimming ---
+# Whether to trim outliers from the training data based on target property values
+TRIM_OUTLIERS = True
+# The quantile to trim from both ends of the distribution (e.g., 0.05 means trimming bottom 5% and top 5%)
+TRIM_QUANTILE = 0.05
