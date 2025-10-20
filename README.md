@@ -147,6 +147,14 @@ python -m src.models.predict_model --model-type ridge
 python -m src.submission.create_submission
 ```
 
+By default this uses `MODEL_TYPE` from `src/config.py` and will auto-detect the private test raw predictions file. If you generated predictions with a specific model type, you can be explicit:
+
+```bash
+python -m src.submission.create_submission --model-type ridge
+# or
+python -m src.submission.create_submission --model-type gbr
+```
+
 ---
 
 ## 5) Outputs
@@ -157,6 +165,30 @@ python -m src.submission.create_submission
 - Private test predictions:
     - `results/private_test_predictions_raw_{model_type}.csv` (e.g., `_ridge`)
     - `results/private_test_predictions.csv` (submission format)
+
+The submission creator looks for the private test raw predictions in this order:
+
+- `results/private_test_predictions_raw_{model_type}.csv`
+- `results/private_test_predictions_raw.csv`
+- A unique match of `results/private_test_predictions_raw_*.csv`
+
+You can override detection with `--model-type`.
+
+---
+
+## 6) Troubleshooting
+
+- Error: `Raw private test prediction file not found at .../results/private_test_predictions_raw.csv`
+    - Cause: By design, `src/models/predict_model.py` saves to `results/private_test_predictions_raw_{model_type}.csv` (e.g., `_ridge`).
+    - Fix:
+        - Generate predictions if missing:
+            ```bash
+            python -m src.models.predict_model --model-type ridge
+            ```
+        - Or pass the model type explicitly when creating the submission:
+            ```bash
+            python -m src.submission.create_submission --model-type ridge
+            ```
 
 ---
 
