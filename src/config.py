@@ -49,17 +49,10 @@ TFIDF_PARAMS = {
 }
 
 # --- Model Parameters ---
-# Parameters for the sparse linear regressor (SGDRegressor with elasticnet)
+# Parameters for the sparse linear regressor (Ridge)
 MODEL_PARAMS = {
-    'loss': 'squared_error',
-    'penalty': 'elasticnet',
     'alpha': 1e-5,  # Regularization strength
-    'l1_ratio': 0.5,  # Balance between L1 and L2
     'fit_intercept': True,
-    'max_iter': 10_000,
     'tol': 1e-3,
-    'shuffle': True,
-    'random_state': RANDOM_STATE,
-    'learning_rate': 'invscaling',
-    'eta0': 0.01,
+    'solver': 'sparse_cg'
 }

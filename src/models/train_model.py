@@ -1,7 +1,7 @@
 import pandas as pd
 import joblib
 from scipy.sparse import hstack
-from sklearn.linear_model import SGDRegressor
+from sklearn.linear_model import Ridge
 from sklearn.utils import resample
 import logging
 import sys
@@ -95,7 +95,7 @@ def train():
                 X_boot, y_boot = resample(X_train, y_train)
 
                 # Initialize and train the sparse linear regression model
-                model = SGDRegressor(**MODEL_PARAMS)
+                model = Ridge(**MODEL_PARAMS)
                 model.fit(X_boot, y_boot)
 
                 current_ensemble_models.append(model)
