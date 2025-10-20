@@ -37,7 +37,7 @@ K_VOCAB = 50000
 
 # --- Model & Ensemble Hyperparameters ---
 # Number of bootstrap models to train in each ensemble
-K_BOOTSTRAP = 15
+K_BOOTSTRAP = 5
 # Random state for reproducibility in bootstrap sampling and model training
 RANDOM_STATE = 42
 
@@ -50,11 +50,30 @@ TFIDF_PARAMS = {
     'smooth_idf': True,
 }
 
+# --- Model Selection ---
+# Choose between 'ridge' and 'gbr'
+MODEL_TYPE = 'ridge' 
+
 # --- Model Parameters ---
 # Parameters for the sparse linear regressor (Ridge)
-MODEL_PARAMS = {
+RIDGE_MODEL_PARAMS = {
     'alpha': 1e-8,  # Regularization strength
     'fit_intercept': True,
     'tol': 1e-3,
     'solver': 'sparse_cg'
+}
+
+# Parameters for Gradient Boosting Regressor
+GBR_MODEL_PARAMS = {
+    'n_estimators': 100,
+    'learning_rate': 0.1,
+    'max_depth': 3,
+    'random_state': RANDOM_STATE,
+    'verbose': 1
+}
+
+# A dictionary to hold all model parameters
+MODEL_PARAMS = {
+    'ridge': RIDGE_MODEL_PARAMS,
+    'gbr': GBR_MODEL_PARAMS
 }
