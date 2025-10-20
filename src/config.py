@@ -56,7 +56,7 @@ MODEL_PARAMS = {
     'alpha': 1e-5,  # Regularization strength
     'l1_ratio': 0.5,  # Balance between L1 and L2
     'fit_intercept': True,
-    'max_iter': 1000,
+    'max_iter': 10_000,
     'tol': 1e-3,
     'shuffle': True,
     'random_state': RANDOM_STATE,
