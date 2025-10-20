@@ -80,6 +80,6 @@ MODEL_PARAMS = {
 
 # --- Outlier Trimming ---
 # Whether to trim outliers from the training data based on target property values
-TRIM_OUTLIERS = True
+TRIM_OUTLIERS = False
 # The quantile to trim from both ends of the distribution (e.g., 0.05 means trimming bottom 5% and top 5%)
 TRIM_QUANTILE = 0.05
