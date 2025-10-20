@@ -131,6 +131,7 @@ python -m src.models.train_model --model-type gbr
 5) Evaluate and get OOF predictions
 
 ```bash
+mkdir results
 python -m src.evaluation.evaluate_model
 ```
 

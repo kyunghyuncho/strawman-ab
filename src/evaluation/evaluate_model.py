@@ -24,10 +24,17 @@ def evaluate(model_type: str):
     # Load the full training data
     df = pd.read_csv(config.DATA_FILE)
 
-    # Load global pre-fitted transformers (fallback). Per-target overrides are loaded in-loop
-    vectorizer_vh_global = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vh.joblib')
-    vectorizer_vl_global = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vl.joblib')
-    encoder_ohe_global = joblib.load(config.ARTEFACTS_DIR / 'encoder_ohe.joblib')
+    # Load global pre-fitted transformers (optional fallback). Per-target overrides are loaded in-loop
+    vectorizer_vh_global = None
+    vectorizer_vl_global = None
+    encoder_ohe_global = None
+    try:
+        vectorizer_vh_global = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vh.joblib')
+        vectorizer_vl_global = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vl.joblib')
+        encoder_ohe_global = joblib.load(config.ARTEFACTS_DIR / 'encoder_ohe.joblib')
+        print("Loaded global transformers (vectorizers and OHE). Will override with per-target if present.")
+    except FileNotFoundError:
+        print("Global transformers not found. Will try per-target transformers for each target.")
 
     # Initialize a dataframe to store all out-of-fold predictions
     oof_preds_df = pd.DataFrame({
@@ -43,20 +50,40 @@ def evaluate(model_type: str):
         fold_predictions = []
 
         # Choose transformers for this target (per-target if available, otherwise global)
-        vectorizer_vh = vectorizer_vh_global
-        vectorizer_vl = vectorizer_vl_global
-        encoder_ohe = encoder_ohe_global
+        vectorizer_vh = None
+        vectorizer_vl = None
+        encoder_ohe = None
+        vh_path = config.ARTEFACTS_DIR / f'vectorizer_vh_{target}.joblib'
+        vl_path = config.ARTEFACTS_DIR / f'vectorizer_vl_{target}.joblib'
+        ohe_path = config.ARTEFACTS_DIR / f'encoder_ohe_{target}.joblib'
         try:
-            vh_path = config.ARTEFACTS_DIR / f'vectorizer_vh_{target}.joblib'
-            vl_path = config.ARTEFACTS_DIR / f'vectorizer_vl_{target}.joblib'
-            ohe_path = config.ARTEFACTS_DIR / f'encoder_ohe_{target}.joblib'
             if vh_path.exists() and vl_path.exists() and ohe_path.exists():
                 vectorizer_vh = joblib.load(vh_path)
                 vectorizer_vl = joblib.load(vl_path)
                 encoder_ohe = joblib.load(ohe_path)
                 print(f"  Using per-target transformers for {target}.")
+            elif all(x is not None for x in [vectorizer_vh_global, vectorizer_vl_global, encoder_ohe_global]):
+                vectorizer_vh = vectorizer_vh_global
+                vectorizer_vl = vectorizer_vl_global
+                encoder_ohe = encoder_ohe_global
+                print(f"  Using global transformers for {target}.")
+            else:
+                missing = []
+                if not vh_path.exists():
+                    missing.append(vh_path.name)
+                if not vl_path.exists():
+                    missing.append(vl_path.name)
+                if not ohe_path.exists():
+                    missing.append(ohe_path.name)
+                print(
+                    f"  Error: No transformers available for target '{target}'. Missing per-target: {', '.join(missing)}. "
+                    "Please run: python -m src.features.build_features --target all"
+                )
+                # Skip evaluation for this target
+                continue
         except Exception as e:
-            print(f"  Warning: falling back to global transformers for {target}: {e}")
+            print(f"  Error: Failed to load transformers for {target}: {e}")
+            continue
 
         # --- Outer CV Loop ---
         for fold_i in config.FOLDS:
@@ -84,7 +111,7 @@ def evaluate(model_type: str):
             # Transform features using pre-fitted transformers
             X_train_vh = vectorizer_vh.transform(df_train[config.VH_SEQUENCE_COL])
             X_train_vl = vectorizer_vl.transform(df_train[config.VL_SEQUENCE_COL])
-            X_train_ohe = encoder_ohe.transform(df_train[[config.HC_SUBTYPE_COL]])
+            X_train_ohe = encoder_ohe.transform(df_train[[config.HC_SUBTYPE_COL]].fillna('Unknown'))
             X_train = hstack([X_train_vh, X_train_vl, X_train_ohe])
 
             # If test set is empty, continue
@@ -94,7 +121,7 @@ def evaluate(model_type: str):
 
             X_test_vh = vectorizer_vh.transform(df_test[config.VH_SEQUENCE_COL])
             X_test_vl = vectorizer_vl.transform(df_test[config.VL_SEQUENCE_COL])
-            X_test_ohe = encoder_ohe.transform(df_test[[config.HC_SUBTYPE_COL]])
+            X_test_ohe = encoder_ohe.transform(df_test[[config.HC_SUBTYPE_COL]].fillna('Unknown'))
             X_test = hstack([X_test_vh, X_test_vl, X_test_ohe])
 
             # Load the pre-trained model ensemble for this fold

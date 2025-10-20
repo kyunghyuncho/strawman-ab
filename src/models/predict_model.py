@@ -22,10 +22,17 @@ def predict(model_type: str):
     test_file = config.DATA_DIR / 'heldout-set-sequences.csv'
     df_test = pd.read_csv(test_file)
 
-    # Load the global transformers (fallback)
-    vectorizer_vh_global = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vh.joblib')
-    vectorizer_vl_global = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vl.joblib')
-    encoder_ohe_global = joblib.load(config.ARTEFACTS_DIR / 'encoder_ohe.joblib')
+    # Load the global transformers (optional fallback)
+    vectorizer_vh_global = None
+    vectorizer_vl_global = None
+    encoder_ohe_global = None
+    try:
+        vectorizer_vh_global = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vh.joblib')
+        vectorizer_vl_global = joblib.load(config.ARTEFACTS_DIR / 'vectorizer_vl.joblib')
+        encoder_ohe_global = joblib.load(config.ARTEFACTS_DIR / 'encoder_ohe.joblib')
+        print("Loaded global transformers (vectorizers and OHE). Will override with per-target if present.")
+    except FileNotFoundError:
+        print("Global transformers not found. Will use per-target transformers if available for each target.")
 
     # Initialize a dataframe to store all predictions
     predictions_df = pd.DataFrame({'antibody_name': df_test['antibody_name']})
@@ -35,9 +42,9 @@ def predict(model_type: str):
         print(f"  Predicting for target: {target}...")
 
         # Load per-target transformers if available
-        vectorizer_vh = vectorizer_vh_global
-        vectorizer_vl = vectorizer_vl_global
-        encoder_ohe = encoder_ohe_global
+        vectorizer_vh = None
+        vectorizer_vl = None
+        encoder_ohe = None
         vh_path = config.ARTEFACTS_DIR / f'vectorizer_vh_{target}.joblib'
         vl_path = config.ARTEFACTS_DIR / f'vectorizer_vl_{target}.joblib'
         ohe_path = config.ARTEFACTS_DIR / f'encoder_ohe_{target}.joblib'
@@ -45,11 +52,28 @@ def predict(model_type: str):
             vectorizer_vh = joblib.load(vh_path)
             vectorizer_vl = joblib.load(vl_path)
             encoder_ohe = joblib.load(ohe_path)
+        elif all(x is not None for x in [vectorizer_vh_global, vectorizer_vl_global, encoder_ohe_global]):
+            vectorizer_vh = vectorizer_vh_global
+            vectorizer_vl = vectorizer_vl_global
+            encoder_ohe = encoder_ohe_global
+        else:
+            missing = []
+            if not vh_path.exists():
+                missing.append(vh_path.name)
+            if not vl_path.exists():
+                missing.append(vl_path.name)
+            if not ohe_path.exists():
+                missing.append(ohe_path.name)
+            print(
+                f"Error: No transformers available for target '{target}'. Missing per-target: {', '.join(missing)}. "
+                "Please run: python -m src.features.build_features --target all"
+            )
+            continue
 
         # Transform test features using the chosen transformers
         X_test_vh = vectorizer_vh.transform(df_test[config.VH_SEQUENCE_COL])
         X_test_vl = vectorizer_vl.transform(df_test[config.VL_SEQUENCE_COL])
-        X_test_ohe = encoder_ohe.transform(df_test[[config.HC_SUBTYPE_COL]])
+        X_test_ohe = encoder_ohe.transform(df_test[[config.HC_SUBTYPE_COL]].fillna('Unknown'))
         X_test_final = hstack([X_test_vh, X_test_vl, X_test_ohe])
 
         # Load the full set of model ensembles for the target

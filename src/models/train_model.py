@@ -50,15 +50,17 @@ def train(model_type: str, use_best: bool = True):
         logging.error(f"Error: The data file was not found at {DATA_FILE}. Please ensure it is in the correct location.")
         return
 
-    # Load the global transformers (fallback). Per-target overrides will be loaded later per target if available
+    # Try to load global transformers (optional). We'll prefer per-target if present.
+    vectorizer_vh_global = None
+    vectorizer_vl_global = None
+    encoder_ohe_global = None
     try:
         vectorizer_vh_global = joblib.load(ARTEFACTS_DIR / 'vectorizer_vh.joblib')
         vectorizer_vl_global = joblib.load(ARTEFACTS_DIR / 'vectorizer_vl.joblib')
         encoder_ohe_global = joblib.load(ARTEFACTS_DIR / 'encoder_ohe.joblib')
         logging.info("Loaded global transformers (vectorizers and OHE). Will override with per-target if present.")
-    except FileNotFoundError as e:
-        logging.error(f"Error loading transformers: {e}. Please run `src/features/build_features.py` first.")
-        return
+    except FileNotFoundError:
+        logging.warning("Global transformers not found. Will look for per-target transformers for each target.")
 
     # --- Model Selection ---
     if model_type == 'ridge':
@@ -85,20 +87,44 @@ def train(model_type: str, use_best: bool = True):
         logging.info(f"--- Processing Target: {target} ---")
 
         # Determine transformers for this target
-        vectorizer_vh = vectorizer_vh_global
-        vectorizer_vl = vectorizer_vl_global
-        encoder_ohe = encoder_ohe_global
+        vectorizer_vh = None
+        vectorizer_vl = None
+        encoder_ohe = None
+        vh_path = ARTEFACTS_DIR / f'vectorizer_vh_{target}.joblib'
+        vl_path = ARTEFACTS_DIR / f'vectorizer_vl_{target}.joblib'
+        ohe_path = ARTEFACTS_DIR / f'encoder_ohe_{target}.joblib'
         try:
-            vh_path = ARTEFACTS_DIR / f'vectorizer_vh_{target}.joblib'
-            vl_path = ARTEFACTS_DIR / f'vectorizer_vl_{target}.joblib'
-            ohe_path = ARTEFACTS_DIR / f'encoder_ohe_{target}.joblib'
             if vh_path.exists() and vl_path.exists() and ohe_path.exists():
                 vectorizer_vh = joblib.load(vh_path)
                 vectorizer_vl = joblib.load(vl_path)
                 encoder_ohe = joblib.load(ohe_path)
                 logging.info(f"Using per-target transformers for {target}.")
+            elif all(x is not None for x in [vectorizer_vh_global, vectorizer_vl_global, encoder_ohe_global]):
+                vectorizer_vh = vectorizer_vh_global
+                vectorizer_vl = vectorizer_vl_global
+                encoder_ohe = encoder_ohe_global
+                logging.info(f"Per-target transformers for {target} not found. Using global transformers.")
+            else:
+                missing = []
+                if not vh_path.exists():
+                    missing.append(vh_path.name)
+                if not vl_path.exists():
+                    missing.append(vl_path.name)
+                if not ohe_path.exists():
+                    missing.append(ohe_path.name)
+                logging.error(
+                    "No transformers available for target '%s'. Missing per-target: %s. "
+                    "Either run 'python -m src.features.build_features --target %s' "
+                    "to create per-target transformers, or run 'python -m src.features.build_features' "
+                    "to create global transformers.",
+                    target,
+                    ", ".join(missing) if missing else "unknown",
+                    target,
+                )
+                return
         except Exception as e:
-            logging.warning(f"Falling back to global transformers for {target}: {e}")
+            logging.error(f"Failed to load transformers for {target}: {e}")
+            return
 
         # Determine model params for this target
         params = params_template.copy()
@@ -156,7 +182,8 @@ def train(model_type: str, use_best: bool = True):
             # using the pre-fitted transformers.
             X_train_vh = vectorizer_vh.transform(df_train[VH_SEQUENCE_COL])
             X_train_vl = vectorizer_vl.transform(df_train[VL_SEQUENCE_COL])
-            X_train_ohe = encoder_ohe.transform(df_train[[HC_SUBTYPE_COL]])
+            # Ensure subtype has no missing values (encoder was fitted with 'Unknown' for missing)
+            X_train_ohe = encoder_ohe.transform(df_train[[HC_SUBTYPE_COL]].fillna('Unknown'))
 
             # Concatenate the sparse matrices into a single feature matrix
             X_train = hstack([X_train_vh, X_train_vl, X_train_ohe], format='csr')
