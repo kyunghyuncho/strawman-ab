@@ -7,15 +7,16 @@ import joblib
 from scipy.sparse import hstack
 import sys
 import os
+import argparse
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 from src import config
 
-def predict():
+def predict(model_type: str):
     """
     Generate and save predictions for the private held-out test set.
     """
-    print("--- Generating predictions for the private test set ---")
+    print(f"--- Generating predictions for the private test set using model_type='{model_type}' ---")
 
     # Load the test data
     test_file = config.DATA_DIR / 'heldout-set-sequences.csv'
@@ -40,8 +41,12 @@ def predict():
         print(f"  Predicting for target: {target}...")
 
         # Load the full set of model ensembles for the target
-        model_path = config.ARTEFACTS_DIR / f'models_{target}.joblib'
-        all_fold_ensembles = joblib.load(model_path)
+        model_path = config.ARTEFACTS_DIR / f'models_{target}_{model_type}.joblib'
+        try:
+            all_fold_ensembles = joblib.load(model_path)
+        except FileNotFoundError:
+            print(f"Error: Model file not found at {model_path}. Please train the '{model_type}' models first.")
+            continue
 
         all_ensemble_predictions = []
 
@@ -65,10 +70,20 @@ def predict():
         predictions_df[target] = final_predictions
 
     # Save the final predictions dataframe
-    output_path = config.RESULTS_DIR / 'private_test_predictions_raw.csv'
+    output_path = config.RESULTS_DIR / f'private_test_predictions_raw_{model_type}.csv'
     predictions_df.to_csv(output_path, index=False)
     print(f"\nTest set predictions saved to {output_path}")
 
 
 if __name__ == '__main__':
-    predict()
+    parser = argparse.ArgumentParser(description="Generate predictions using trained models.")
+    parser.add_argument(
+        '--model-type', 
+        type=str, 
+        default=config.MODEL_TYPE, 
+        choices=['ridge', 'gbr'],
+        help="The type of model to use for predictions ('ridge' or 'gbr')."
+    )
+    args = parser.parse_args()
+
+    predict(model_type=args.model_type)

@@ -31,13 +31,13 @@ FOLDS = [0, 1, 2, 3, 4]
 
 # --- Feature Engineering Hyperparameters ---
 # The maximum N for N-grams (1 to N_GRAM_MAX will be used)
-N_GRAM_MAX = 32
+N_GRAM_MAX = 64
 # Total vocabulary size (split between VH and VL)
-K_VOCAB = 50000
+K_VOCAB = 2000
 
 # --- Model & Ensemble Hyperparameters ---
 # Number of bootstrap models to train in each ensemble
-K_BOOTSTRAP = 15
+K_BOOTSTRAP = 5
 # Random state for reproducibility in bootstrap sampling and model training
 RANDOM_STATE = 42
 
@@ -50,11 +50,36 @@ TFIDF_PARAMS = {
     'smooth_idf': True,
 }
 
+# --- Model Selection ---
+# Choose between 'ridge' and 'gbr'
+MODEL_TYPE = 'ridge' 
+
 # --- Model Parameters ---
 # Parameters for the sparse linear regressor (Ridge)
-MODEL_PARAMS = {
+RIDGE_MODEL_PARAMS = {
     'alpha': 1e-8,  # Regularization strength
     'fit_intercept': True,
     'tol': 1e-3,
     'solver': 'sparse_cg'
 }
+
+# Parameters for Gradient Boosting Regressor
+GBR_MODEL_PARAMS = {
+    'n_estimators': 100,
+    'learning_rate': 0.1,
+    'max_depth': 3,
+    'random_state': RANDOM_STATE,
+    'verbose': 1
+}
+
+# A dictionary to hold all model parameters
+MODEL_PARAMS = {
+    'ridge': RIDGE_MODEL_PARAMS,
+    'gbr': GBR_MODEL_PARAMS
+}
+
+# --- Outlier Trimming ---
+# Whether to trim outliers from the training data based on target property values
+TRIM_OUTLIERS = False
+# The quantile to trim from both ends of the distribution (e.g., 0.05 means trimming bottom 5% and top 5%)
+TRIM_QUANTILE = 0.05

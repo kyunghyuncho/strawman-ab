@@ -2,11 +2,13 @@ import pandas as pd
 import joblib
 from scipy.sparse import hstack
 from sklearn.linear_model import Ridge
+from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.utils import resample
 import logging
 import sys
 import os
 import numpy as np
+import argparse
 
 # Ensure the source directory is in the Python path to import config
 # This allows the script to be run from the root directory
@@ -15,13 +17,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import (
     DATA_FILE, TARGET_PROPERTIES, FOLD_COLUMN, FOLDS, VH_SEQUENCE_COL,
     VL_SEQUENCE_COL, HC_SUBTYPE_COL, K_BOOTSTRAP, MODEL_PARAMS, ARTEFACTS_DIR,
-    LOG_TRANSFORM_TARGETS
+    LOG_TRANSFORM_TARGETS, MODEL_TYPE, TRIM_OUTLIERS, TRIM_QUANTILE
 )
 
 # Configure logging to provide informative output during execution
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def train():
+def train(model_type: str):
     """
     Trains and saves model ensembles for each target property using 5-fold cross-validation.
 
@@ -32,9 +34,9 @@ def train():
     4. In each fold, an ensemble of `K_BOOTSTRAP` regressors is trained on
        bootstrap-resampled data from the other four folds.
     5. The trained ensembles for all five folds are saved to a single file
-       per target property in the `artefacts/` directory.
+       per target property in the `artefacts/` directory, named according to the model type.
     """
-    logging.info("Starting model training process...")
+    logging.info(f"Starting model training process for model_type='{model_type}'...")
 
     # Create the artefacts directory if it doesn't exist
     ARTEFACTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -56,6 +58,17 @@ def train():
     except FileNotFoundError as e:
         logging.error(f"Error loading transformers: {e}. Please run `src/features/build_features.py` first.")
         return
+
+    # --- Model Selection ---
+    if model_type == 'ridge':
+        model_class = Ridge
+    elif model_type == 'gbr':
+        model_class = GradientBoostingRegressor
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+    
+    params = MODEL_PARAMS[model_type]
+    logging.info(f"Using model: {model_class.__name__} with parameters: {params}")
 
     # Loop through each target property to train a separate set of models
     for target in TARGET_PROPERTIES:
@@ -81,7 +94,21 @@ def train():
             # Split data into training and hold-out (test) sets for this fold
             # The training set consists of all data NOT in the current fold
             train_mask = (df_target[FOLD_COLUMN] != fold_i)
-            df_train = df_target[train_mask]
+            df_train_full = df_target[train_mask]
+
+            # --- Outlier Trimming ---
+            if TRIM_OUTLIERS:
+                lower_bound = df_train_full[target].quantile(TRIM_QUANTILE)
+                upper_bound = df_train_full[target].quantile(1 - TRIM_QUANTILE)
+                
+                original_count = len(df_train_full)
+                df_train = df_train_full[
+                    (df_train_full[target] >= lower_bound) & (df_train_full[target] <= upper_bound)
+                ]
+                trimmed_count = original_count - len(df_train)
+                logging.info(f"    Trimmed {trimmed_count} outliers from training data for fold {fold_i} ({((trimmed_count/original_count)*100):.2f}%).")
+            else:
+                df_train = df_train_full
             
             y_train = df_train[target]
 
@@ -101,8 +128,8 @@ def train():
                 # Resample the training data with replacement to create a bootstrap sample
                 X_boot, y_boot = resample(X_train, y_train)
 
-                # Initialize and train the sparse linear regression model
-                model = Ridge(**MODEL_PARAMS)
+                # Initialize and train the regression model
+                model = model_class(**params)
                 model.fit(X_boot, y_boot)
 
                 current_ensemble_models.append(model)
@@ -113,11 +140,21 @@ def train():
 
         # After iterating through all folds, save the complete dictionary of ensembles
         # for the current target property. This file contains 5 * K_BOOTSTRAP models.
-        model_filename = ARTEFACTS_DIR / f'models_{target}.joblib'
+        model_filename = ARTEFACTS_DIR / f'models_{target}_{model_type}.joblib'
         joblib.dump(all_fold_ensembles, model_filename)
         logging.info(f"Saved all 5 fold-ensembles for {target} to {model_filename}")
 
-    logging.info("Model training process completed for all target properties.")
+    logging.info(f"Model training process completed for {model_type} models.")
 
 if __name__ == '__main__':
-    train()
+    parser = argparse.ArgumentParser(description="Train models for antibody property prediction.")
+    parser.add_argument(
+        '--model-type', 
+        type=str, 
+        default=MODEL_TYPE, 
+        choices=['ridge', 'gbr'],
+        help="The type of model to train ('ridge' or 'gbr'). Defaults to the value in config.py."
+    )
+    args = parser.parse_args()
+    
+    train(model_type=args.model_type)
