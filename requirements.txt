@@ -3,3 +3,4 @@ scikit-learn
 joblib
 numpy
 notebook
+matplotlib
