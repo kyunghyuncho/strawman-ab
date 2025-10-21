@@ -76,17 +76,17 @@ pip install -r requirements.txt
 - Global/average tuning across all targets
 
 ```bash
-python -m src.models.hyperparameter_search --target avg --n-iter 30
+python -m src.models.hyperparameter_search --target avg --n-iter 50
 ```
 
 - Single target or all targets (per‑target tuning)
 
 ```bash
 # one target (faster)
-python -m src.models.hyperparameter_search --target Titer --n-iter 15
+python -m src.models.hyperparameter_search --target Titer --n-iter 50
 
 # all targets (longer)
-python -m src.models.hyperparameter_search --target all --n-iter 15
+python -m src.models.hyperparameter_search --target all --n-iter 50
 ```
 
 This writes trials CSV(s) and updates `artefacts/best_params.json` with:
@@ -104,7 +104,7 @@ This writes trials CSV(s) and updates `artefacts/best_params.json` with:
 
 3) Build features
 
-- Build global transformers (fallback)
+- Build global transformers (fallback; not really recommended nor supported)
 
 ```bash
 python -m src.features.build_features
@@ -124,7 +124,7 @@ python -m src.features.build_features --use-best --target Titer
 # Ridge (default). Uses per‑target alpha and per‑target vectorizers if available.
 python -m src.models.train_model --model-type ridge
 
-# Gradient Boosting (optional)
+# Gradient Boosting (not supported yet)
 python -m src.models.train_model --model-type gbr
 ```
 
