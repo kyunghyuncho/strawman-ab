@@ -5,13 +5,47 @@ formats them into the required submission format, and saves them as CSV files.
 import pandas as pd
 import sys
 import os
+import argparse
+from pathlib import Path
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 from src import config
 
-def create_submission_files():
+def _resolve_private_preds_path(model_type: str) -> Path:
+    """Resolve the path to the private test raw predictions.
+
+    Tries the following in order:
+    1) results/private_test_predictions_raw_{model_type}.csv
+    2) results/private_test_predictions_raw.csv
+    3) First match of results/private_test_predictions_raw_*.csv (if unique)
+    """
+    # 1) Model-type specific
+    specific = config.RESULTS_DIR / f'private_test_predictions_raw_{model_type}.csv'
+    if specific.exists():
+        return specific
+
+    # 2) Legacy unsuffixed name
+    legacy = config.RESULTS_DIR / 'private_test_predictions_raw.csv'
+    if legacy.exists():
+        return legacy
+
+    # 3) Any matching file (if unique)
+    matches = list(config.RESULTS_DIR.glob('private_test_predictions_raw_*.csv'))
+    if len(matches) == 1:
+        return matches[0]
+
+    # If multiple matches, prefer current config.MODEL_TYPE
+    preferred = config.RESULTS_DIR / f'private_test_predictions_raw_{config.MODEL_TYPE}.csv'
+    if preferred.exists():
+        return preferred
+
+    # Nothing found
+    return specific  # return the expected specific path for error message
+
+
+def create_submission_files(model_type: str):
     """
     Loads raw predictions, formats them, and saves the final submission files.
     """
@@ -19,7 +53,7 @@ def create_submission_files():
 
     # --- Define paths for input and output files ---
     cv_preds_raw_path = config.RESULTS_DIR / 'gdp_a1_cv_predictions_raw.csv'
-    private_preds_raw_path = config.RESULTS_DIR / 'private_test_predictions_raw.csv'
+    private_preds_raw_path = _resolve_private_preds_path(model_type)
     
     cv_submission_path = config.RESULTS_DIR / 'gdp_a1_cv_predictions.csv'
     private_submission_path = config.RESULTS_DIR / 'private_test_predictions.csv'
@@ -35,10 +69,11 @@ def create_submission_files():
 
     try:
         private_preds_raw = pd.read_csv(private_preds_raw_path)
-        print("Successfully loaded raw private test predictions.")
+        print(f"Successfully loaded raw private test predictions from: {private_preds_raw_path}")
     except FileNotFoundError:
         print(f"Error: Raw private test prediction file not found at {private_preds_raw_path}")
         print("Please ensure you have run src/models/predict_model.py successfully.")
+        print("Tip: Generate it with e.g. 'python -m src.models.predict_model --model-type ridge' (or gbr).")
         return
 
     # --- Format and Save CV Submission File ---
@@ -84,4 +119,15 @@ def create_submission_files():
 if __name__ == '__main__':
     # Create the results directory if it doesn't exist
     config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    create_submission_files()
+
+    parser = argparse.ArgumentParser(description="Create formatted submission CSVs from raw predictions.")
+    parser.add_argument(
+        '--model-type',
+        type=str,
+        default=config.MODEL_TYPE,
+        choices=['ridge', 'gbr'],
+        help="Model type used to generate private predictions (affects input filename)."
+    )
+    args = parser.parse_args()
+
+    create_submission_files(model_type=args.model_type)
